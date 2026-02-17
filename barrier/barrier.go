@@ -1,28 +1,30 @@
 package barrier
 
-import "sync"
+import (
+	"github.com/abeld/syncprims/cond"
+	"github.com/abeld/syncprims/mutex"
+)
 
-// Barrier blocks until n goroutines have called Wait, then releases them all.
 type Barrier struct {
-	n           int
-	count       int
-	mu          sync.Mutex
-	cond        *sync.Cond
-	generation  uint64
+	n          int
+	count      int
+	generation uint64
+	mu         *mutex.Mutex
+	cv         *cond.Cond
 }
 
-// New returns a barrier that waits for n goroutines.
 func New(n int) *Barrier {
 	if n <= 0 {
 		panic("barrier: n must be positive")
 	}
-	b := &Barrier{n: n}
-	b.cond = sync.NewCond(&b.mu)
-	return b
+	mu := mutex.New()
+	return &Barrier{
+		n:  n,
+		mu: mu,
+		cv: cond.New(mu),
+	}
 }
 
-// Wait blocks until n goroutines have called Wait. When the nth goroutine calls Wait,
-// all n are released. Wait may be called again for the next "round".
 func (b *Barrier) Wait() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -31,10 +33,11 @@ func (b *Barrier) Wait() {
 	if b.count == b.n {
 		b.count = 0
 		b.generation++
-		b.cond.Broadcast()
+		b.cv.Broadcast()
 		return
 	}
 	for gen == b.generation {
-		b.cond.Wait()
+		b.cv.Wait()
 	}
 }
+

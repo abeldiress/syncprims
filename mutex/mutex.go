@@ -1,24 +1,34 @@
 package mutex
 
-import "sync"
-
-// Mutex provides mutual exclusion with Lock, Unlock, and TryLock.
+// Mutex is a mutual exclusion lock built on a channel.
 type Mutex struct {
-	mu sync.Mutex
+	ch chan struct{}
 }
 
-// Lock locks the mutex. If the lock is already in use, the calling goroutine blocks.
+func New() *Mutex {
+	m := &Mutex{ch: make(chan struct{}, 1)}
+	m.ch <- struct{}{}
+	return m
+}
+
 func (m *Mutex) Lock() {
-	m.mu.Lock()
+	<-m.ch
 }
 
-// Unlock unlocks the mutex.
 func (m *Mutex) Unlock() {
-	m.mu.Unlock()
+	select {
+	case m.ch <- struct{}{}:
+	default:
+		panic("syncprims/mutex: unlock of unlocked mutex")
+	}
 }
 
-// TryLock attempts to lock the mutex without blocking.
-// It returns true if the lock was acquired, false otherwise.
 func (m *Mutex) TryLock() bool {
-	return m.mu.TryLock()
+	select {
+	case <-m.ch:
+		return true
+	default:
+		return false
+	}
 }
+
