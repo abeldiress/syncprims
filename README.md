@@ -35,15 +35,17 @@ The semaphore is implemented as a **buffered channel of empty structs**. The cap
 
 ### Mutex and RWMutex
 
-These wrap the standard library’s `sync.Mutex` and `sync.RWMutex`. The main addition is a consistent API that includes **TryLock** (and **TryRLock** for RWMutex), so callers can attempt to acquire the lock without blocking and react if it’s already held.
+Both locks are implemented **purely with channels**, not `sync.Mutex`/`sync.RWMutex`.  
+`Mutex` is a binary semaphore (`chan struct{}` of size 1) with `Lock`, `Unlock`, and `TryLock`.  
+`RWMutex` combines a writer semaphore with a small internal mutex and reader count, allowing multiple readers or a single writer, plus non-blocking `TryLock`/`TryRLock`.
 
 ### Condition variable (Cond)
 
-**Cond** wraps `sync.Cond`. It is always used with an external lock (the caller passes a `sync.Locker` to `New`). **Wait** atomically releases the lock and blocks the goroutine until **Signal** (one waiter) or **Broadcast** (all waiters) is called; when **Wait** returns, the lock is held again. The typical pattern is: hold the lock, check a condition in a loop, call **Wait** inside the loop if the condition isn’t met, then recheck after **Wait** returns. This avoids lost wakeups and spurious wakeups.
+`Cond` is built on top of this library’s `Mutex`. Each waiter registers a dedicated channel and then unlocks and blocks. `Signal` takes one waiter from a slice and wakes it; `Broadcast` wakes them all. When a waiter is released it re-locks the associated mutex before returning.
 
 ### Barrier
 
-The barrier is implemented with a **mutex and a condition variable**. A shared counter counts how many goroutines have called **Wait**; when the count reaches N, the last goroutine resets the counter, increments a generation number, and calls **Broadcast** on the condition variable so all waiters are released. The generation number is used so that waiters from the previous round don’t wake up in the next round. Each goroutine that isn’t the Nth one waits on the condition until the generation changes, then returns. The barrier is reusable: after each “round,” all N goroutines can call **Wait** again for the next round.
+The barrier uses the custom `Mutex` and `Cond` types. A counter tracks how many goroutines have called `Wait`; when it reaches `n`, the last goroutine resets the counter, bumps a generation counter, and broadcasts on the condition variable so all waiters continue. The generation counter allows the same barrier instance to be reused for multiple rounds.
 
 ## Usage and examples
 
